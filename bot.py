@@ -12,7 +12,7 @@ CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID") # Может быть None для �
 MAX_PRICE = int(os.getenv("MAX_PRICE", "20000"))      # Максимальная цена
 CHECK_INTERVAL = int(os.getenv("INTERVAL_CHECK", "600")) # Проверка каждые 10 минут (в секундах)
 
-# ⚙️ Фильтр объявлений — только iPhone 13
+# ⚙️ Фильтр объявлений —  iPhone 13 14 15 16 17 pro maks 
 IPHONE_13_KEYWORDS = ["iphone 13", "айфон 13"] # Список ключевых слов
 IPHONE_13_PATTERN = re.compile("|".join(IPHONE_13_KEYWORDS), flags=re.I) 
 
@@ -244,7 +244,7 @@ def main():
 
         print(
             f"😴 Следующая проверка через "
-            f"{CHECK_INTERVAL // 60} минут..."
+            f"{CHECK_INTERVAL // 3} минут..."
         )
 
         time.sleep(CHECK_INTERVAL)
