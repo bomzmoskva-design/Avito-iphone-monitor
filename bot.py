@@ -27,17 +27,70 @@ def save_seen(seen):
         json.dump(list(seen)[-1000:], f, ensure_ascii=False)
 
 
-def send_telegram(text):
+def send_telegram(text, chat_id=None):
+    if chat_id is None:
+        chat_id = CHAT_ID
+
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+
     requests.post(
         url,
         data={
-            "chat_id": CHAT_ID,
+            "chat_id": chat_id,
             "text": text,
             "disable_web_page_preview": False,
         },
         timeout=20,
     )
+
+
+def check_telegram():
+    """
+    Проверяем сообщения Telegram.
+    Бот отвечает на /start и обычные сообщения.
+    """
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
+
+    try:
+        response = requests.get(
+            url,
+            params={"timeout": 1},
+            timeout=10,
+        )
+
+        data = response.json()
+
+        if not data.get("ok"):
+            print("Telegram error:", data)
+            return
+
+        for update in data.get("result", []):
+            message = update.get("message")
+
+            if not message:
+                continue
+
+            chat_id = message["chat"]["id"]
+            text = message.get("text", "")
+
+            if text == "/start":
+                send_telegram(
+                    "👋 Привет!\n\n"
+                    "Я монитор объявлений Avito.\n\n"
+                    "Я буду искать новые объявления iPhone "
+                    "в Москве и присылать их сюда.",
+                    chat_id,
+                )
+
+            elif text:
+                send_telegram(
+                    "✅ Бот работает.\n\n"
+                    "Я слежу за новыми объявлениями Avito.",
+                    chat_id,
+                )
+
+    except Exception as e:
+        print("Ошибка Telegram:", e)
 
 
 def get_ads(url):
@@ -48,7 +101,11 @@ def get_ads(url):
         )
     }
 
-    response = requests.get(url, headers=headers, timeout=30)
+    response = requests.get(
+        url,
+        headers=headers,
+        timeout=30,
+    )
 
     if response.status_code != 200:
         print("Avito HTTP:", response.status_code)
@@ -85,7 +142,7 @@ def get_ads(url):
     return result
 
 
-def main():
+def check_avito():
     seen = load_seen()
     new_count = 0
 
@@ -113,11 +170,21 @@ def main():
                 time.sleep(1)
 
         except Exception as e:
-            print("Ошибка:", e)
+            print("Ошибка Avito:", e)
 
     save_seen(seen)
 
     print(f"Новых объявлений: {new_count}")
+
+
+def main():
+    print("Бот запущен")
+
+    # Проверяем Telegram
+    check_telegram()
+
+    # Проверяем Avito
+    check_avito()
 
 
 if __name__ == "__main__":
