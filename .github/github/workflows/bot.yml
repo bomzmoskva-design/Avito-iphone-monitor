@@ -1,12 +1,15 @@
-name: Avito monitor
+name: Avito iPhone Monitor
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "*/10 * * * *"
+
+permissions:
+  contents: write
 
 jobs:
-  run-bot:
+  monitor:
     runs-on: ubuntu-latest
 
     steps:
@@ -21,8 +24,8 @@ jobs:
       - name: Установить зависимости
         run: pip install -r requirements.txt
 
-      - name: Запустить бота
+      - name: Запустить монитор
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python bot.py
+        run: python "бот.py"
