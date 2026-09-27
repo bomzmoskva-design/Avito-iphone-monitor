@@ -102,9 +102,9 @@ def get_ads(url):
         href = link.get("href")
 
         # ✅ ФИЛЬТР ПО МОДЕЛИ
-        # Пропускаем все объявления, где нет слова iPhone 13 или Айфон 13
+        # слова iPhone 13 или Айфон 13
         if IPHONE_13_PATTERN.search(title) is None:
-            continue
+            continue telefon телефон планшет 
 
         # Приводим относительную ссылку к абсолютной
         if href.startswith("/"):
