@@ -1,31 +1,21 @@
-name: Avito iPhone Monitor
+monitor:
+  runs-on: ubuntu-latest
 
-on:
-  workflow_dispatch:
-  schedule:
-    - cron: "*/10 * * * *"
+  steps:
+    - name: Скачать код
+      uses: actions/checkout@v4
 
-permissions:
-  contents: write
+    - name: Установить Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
 
-jobs:
-  monitor:
-    runs-on: ubuntu-latest
+    - name: Установить зависимости
+      run: pip install -r requirements.txt
 
-    steps:
-      - name: Скачать код
-        uses: actions/checkout@v4
-
-      - name: Установить Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Установить зависимости
-        run: pip install -r requirements.txt
-
-      - name: Запустить монитор
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python "бот.py"
+    # ⚠️ Вот это место надо изменить!
+    - name: Запустить монитор
+      env:
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      run: python bot.py # <— Смотри сюда! Без кавычек и русское слово убрано
