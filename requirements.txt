@@ -1,4 +1,1 @@
-- name: Установить библиотеки
-  run: |
-    pip install --upgrade pip
-    pip install requests beautifulsoup4 playwright
+
