@@ -1,4 +1,2 @@
-requests
-beautifulsoup4
-playwright
-aiohttp
+- name: Install fonts for screenshots
+  run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk fonts-noto-color-emoji
