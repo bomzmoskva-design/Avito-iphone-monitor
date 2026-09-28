@@ -17,10 +17,12 @@ jobs:
           python-version: "3.12"
 
       - name: Установить зависимости
-        run: pip install -r requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install requests beautifulsoup4 playwright aiohttp
 
       - name: Установить Chromium
-        run: playwright install --with-deps chromium
+        run: python -m playwright install --with-deps chromium
 
       - name: Запустить монитор
         env:
