@@ -1,4 +1,4 @@
-import os
+print("БОТ ЗАПУСТИЛСЯ", flush=True) import os
 import json
 import time
 import re
