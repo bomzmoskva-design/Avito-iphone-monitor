@@ -24,6 +24,14 @@ jobs:
       - name: Установить Chromium
         run: python -m playwright install --with-deps chromium
 
+            - name: Проверить Playwright
+        run: |
+          python -m pip show playwright
+          python -c "import playwright; print('PLAYWRIGHT OK')"
+
+      - name: Установить Chromium
+        run: python -m playwright install --with-deps chromium
+
       - name: Запустить монитор
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
