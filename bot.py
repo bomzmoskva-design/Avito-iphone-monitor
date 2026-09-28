@@ -4,251 +4,642 @@ import time
 import re
 import requests
 from bs4 import BeautifulSoup as BS
+from urllib.parse import urljoin
 
-# ⚙️ Настройки бота (переменные окружения)
+
+# =========================
+# НАСТРОЙКИ
+# =========================
+
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
-CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID") # Может быть None для всех чатов
 
-MAX_PRICE = int(os.getenv("MAX_PRICE", "20000"))      # Максимальная цена
-CHECK_INTERVAL = int(os.getenv("INTERVAL_CHECK", "600")) # Проверка каждые 10 минут (в секундах)
-
-# ⚙️ Фильтр объявлений —  iPhone 13 14 15 16 17 pro maks 
-IPHONE_13_KEYWORDS = ["iphone 13", "айфон 13"] # Список ключевых слов
-IPHONE_13_PATTERN = re.compile("|".join(IPHONE_13_KEYWORDS), flags=re.I) 
+MAX_PRICE = int(os.getenv("MAX_PRICE", "20000"))
+CHECK_INTERVAL = int(os.getenv("INTERVAL_CHECK", "600"))
 
 SEARCH_URLS = [
-    "https://www.avito.ru/moskva/telefony/iphone",
+    "https://www.avito.ru/moskva/telefony/iphone"
 ]
+
+# Сейчас ищем iPhone 13
+IPHONE_KEYWORDS = [
+    "iphone 13",
+    "айфон 13",
+]
+
+IPHONE_PATTERN = re.compile(
+    "|".join(re.escape(x) for x in IPHONE_KEYWORDS),
+    re.I
+)
+
 STATE_FILE = "seen.json"
+CHAT_FILE = "chat_id.json"
+OFFSET_FILE = "telegram_offset.json"
+
+
+# =========================
+# СОХРАНЕНИЕ CHAT ID
+# =========================
+
+def load_chat_id():
+    try:
+        with open(CHAT_FILE, "r", encoding="utf-8") as f:
+            return json.load(f).get("chat_id")
+    except Exception:
+        return None
+
+
+def save_chat_id(chat_id):
+    with open(CHAT_FILE, "w", encoding="utf-8") as f:
+        json.dump({"chat_id": chat_id}, f)
+
+
+# =========================
+# TELEGRAM OFFSET
+# =========================
+
+def load_offset():
+    try:
+        with open(OFFSET_FILE, "r", encoding="utf-8") as f:
+            return json.load(f).get("offset", 0)
+    except Exception:
+        return 0
+
+
+def save_offset(offset):
+    with open(OFFSET_FILE, "w", encoding="utf-8") as f:
+        json.dump({"offset": offset}, f)
+
+
+# =========================
+# УЖЕ ОТПРАВЛЕННЫЕ
+# =========================
 
 def load_seen():
-    """Загружает список уже отправленных ID объявлений."""
+
     try:
         with open(STATE_FILE, "r", encoding="utf-8") as f:
             return set(json.load(f))
+
     except Exception:
         return set()
 
+
 def save_seen(seen):
-    """Сохраняет последние 2000 уникальных ID объявлений."""
+
     with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(list(seen)[-2000:], f, ensure_ascii=False)
+        json.dump(
+            list(seen)[-2000:],
+            f,
+            ensure_ascii=False
+        )
+
+
+# =========================
+# TELEGRAM
+# =========================
 
 def send_telegram(text, chat_id=None):
-    """
-    Отправляет сообщение в Telegram.
-    
-    Если CHAT_ID не задано как переменная окружения,
-    бот будет отвечать только тому пользователю, который написал команду /start.
-    """
-    if not chat_id and CHAT_ID is None:
-        print("Telegram: чат не найден")
-        return
+
+    if chat_id is None:
+        chat_id = load_chat_id()
+
+    if not chat_id:
+        print("❌ Telegram: CHAT_ID не найден")
+        return False
 
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    response = requests.post(
-        url,
-        data={
-            "chat_id": chat_id or CHAT_ID,
-            "text": text,
-            "disable_web_page_preview": False,
-        },
-        timeout=20,
-    )
-
-    print("Telegram:", response.status_code)
-
-def get_price(price_text):
-    """
-    Извлекает число из строки цены.
-    Например: '19 990 ₽' -> 19990
-              '15 000 руб.' -> 15000
-    """
-    numbers = re.sub(r"[^\d]", "", price_text)
-    return int(numbers) if numbers else None
-
-
-def get_ads(url):
-    """
-    Парсит страницу Avito и возвращает подходящие объявления.
-    """
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Linux; Android 12; "
-            "K) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/140.0 Mobile Safari/537.36"
-        ),
-        "Accept-Language": "ru-RU,ru;q=0.9",
-    }
 
     try:
-        response = requests.get(url, headers=headers, timeout=30)
-    except Exception as e:
-        print("Ошибка запроса Avito:", e)
-        return []
 
-    soup = BS(response.text, "html.parser")
-
-    result = []
-
-    for item in soup.select('[data-marker="item"]'):
-        link = item.select_one('a[data-marker="item-title"]')
-        
-        # Пропускаем объявление без ссылки или названия
-        if not link:
-            continue
-
-        title = link.get_text(" ", strip=True)
-        href = link.get("href")
-
-        # ✅ ФИЛЬТР ПО МОДЕЛИ
-        # слова iPhone 13 или Айфон 13
-        if IPHONE_13_PATTERN.search(title) is None:
-            continue telefon телефон планшет 
-
-        # Приводим относительную ссылку к абсолютной
-        if href.startswith("/"):
-            href = "https://www.avito.ru" + href
-
-        price_element = item.select_one('[data-marker="item-price"]')
-        price_text = price_element.get_text(" ", strip=True) if price_element else ""
-        price = get_price(price_text)
-
-        # Пропускаем объявления без цены или выше лимита
-        if price is None or price > MAX_PRICE:
-            continue
-
-        result.append({
-            "title": title,
-            "price": price,
-            "url": href,
-        })
-
-    return result
-
-
-def check_avito():
-    """
-    Ищет новые объявления на Avito и отправляет их в Telegram.
-    """
-    seen = load_seen()          # Загружаем уже отправленные ID
-    new_count = 0              # Счётчик новых объявлений
-
-    for search_url in SEARCH_URLS:
-        ads = get_ads(search_url)
-
-        print("Подходящих объявлений:", len(ads))
-
-        for ad in ads:
-            # Используем URL как уникальный идентификатор
-            ad_id = ad["url"]
-
-            # Если такое объявление уже было отправлено — пропускаем его
-            if ad_id in seen:
-                continue
-
-            seen.add(ad_id)
-            new_count += 1
-
-            message = (
-                "🚨 НОВЫЙ iPHONE\n\n"
-                f"📱 {ad['title']}\n"
-                f"💰 {ad['price']:,} ₽\n\n"
-                f"🔗 {ad['url']}\n\n"
-                f"⚙️ Лимит: {MAX_PRICE:,} ₽"
-            )
-
-            send_telegram(message)
-
-            # Делаем паузу между сообщениями, чтобы не забанили
-            time.sleep(1)
-
-    save_seen(seen)           # Сохраняем обновленный список отправленных ID
-    print(f"Новых объявлений отправлено: {new_count}")
-
-
-def check_telegram():
-    """
-    Обрабатывает команды от пользователя через Telegram API.
-    Поддерживает команды /start и /status.
-    """
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
-
-    try:
-        response = requests.get(
+        response = requests.post(
             url,
-            params={"timeout": 1},
-            timeout=10,
+            data={
+                "chat_id": chat_id,
+                "text": text,
+                "disable_web_page_preview": False,
+            },
+            timeout=20,
         )
 
         data = response.json()
 
-        if not data.get("ok"):
-            print("Ошибка Telegram:", data)
-            return
+        print("Telegram:", response.status_code, data)
 
-        updates = data.get("result", [])
-
-        for update in updates:
-            message = update.get("message")
-
-            if not message:
-                continue
-
-            chat_id = message["chat"]["id"]
-            text = message.get("text", "").strip().lower()
-
-            # Команда /start — приветствие
-            if text == "/start":
-                send_telegram(
-                    "👋 Привет!\n\n"
-                    "Я Avito-монитор iPhone.\n\n"
-                    f"📍 Москва\n"
-                    f"💰 Максимальная цена: {MAX_PRICE:,} ₽\n"
-                    "🔄 Проверка каждые 10 минут.\n\n"
-                    "Я буду присылать новые подходящие объявления.",
-                    chat_id,
-                )
-            
-            # Команда /status — текущее состояние
-            elif text == "/status":
-                send_telegram(
-                    "🟢 Бот работает.\n\n"
-                    f"📍 Москва\n"
-                    f"💰 Лимит: {MAX_PRICE:,} ₽\n"
-                    "🔄 Интервал: 10 минут",
-                    chat_id,
-                )
+        return data.get("ok", False)
 
     except Exception as e:
-        print("Ошибка Telegram:", e)
+
+        print("❌ Ошибка Telegram:", e)
+
+        return False
 
 
-def main():
-    """
-    Основной цикл работы бота.
-    Каждые CHECK_INTERVAL секунд проверяет Avito и Telegram.
-    """
-    print("=" * 40)
-    print("🚀 Avito iPhone Monitor запущен")
-    print(f"💰 Максимальная цена: {MAX_PRICE:,} ₽")
-    print(f"⏱ Проверка каждые {CHECK_INTERVAL // 60} минут")
-    print("=" * 40)
+# =========================
+# ЦЕНА
+# =========================
 
-    while True:
-        print("\n📨 Проверяем Telegram...")
-        check_telegram()
+def get_price(price_text):
 
-        print("🔎 Проверяем Avito...")
-        check_avito()
+    numbers = re.sub(r"[^\d]", "", price_text)
 
-        print(
-            f"😴 Следующая проверка через "
-            f"{CHECK_INTERVAL // 3} минут..."
+    if not numbers:
+        return None
+
+    try:
+        return int(numbers)
+    except:
+        return None
+
+
+# =========================
+# AVITO
+# =========================
+
+def get_ads(url):
+
+    headers = {
+
+        "User-Agent":
+            "Mozilla/5.0 (Linux; Android 12) "
+            "AppleWebKit/537.36 "
+            "(KHTML, like Gecko) "
+            "Chrome/140.0.0.0 Mobile Safari/537.36",
+
+        "Accept":
+            "text/html,application/xhtml+xml,"
+            "application/xml;q=0.9,image/avif,image/webp,"
+            "*/*;q=0.8",
+
+        "Accept-Language":
+            "ru-RU,ru;q=0.9",
+
+        "Cache-Control":
+            "no-cache",
+
+    }
+
+    try:
+
+        response = requests.get(
+            url,
+            headers=headers,
+            timeout=30
         )
 
-        time.sleep(CHECK_INTERVAL)
+        print(
+            "Avito:",
+            response.status_code,
+            "размер:",
+            len(response.text)
+        )
+
+    except Exception as e:
+
+        print("❌ Ошибка запроса Avito:", e)
+
+        return []
+
+
+    # Проверяем защиту Avito
+
+    text_lower = response.text.lower()
+
+    if response.status_code in [403, 429]:
+
+        print(
+            "⚠️ Avito заблокировал автоматический запрос:",
+            response.status_code
+        )
+
+        return []
+
+
+    if "captcha" in text_lower:
+
+        print("⚠️ Avito показал CAPTCHA")
+
+        return []
+
+
+    soup = BS(response.text, "html.parser")
+
+
+    # Ищем карточки
+    items = soup.select('[data-marker="item"]')
+
+    print("Карточек найдено:", len(items))
+
+
+    if not items:
+
+        print(
+            "⚠️ Avito не вернул карточки объявлений."
+        )
+
+        return []
+
+
+    result = []
+
+
+    for item in items:
+
+        # Название + ссылка
+        link = item.select_one(
+            'a[data-marker="item-title"]'
+        )
+
+        if not link:
+
+            # запасной вариант
+            link = item.select_one(
+                'a[href*="/obyavlenie/"]'
+            )
+
+        if not link:
+            continue
+
+
+        title = link.get_text(
+            " ",
+            strip=True
+        )
+
+        href = link.get("href")
+
+
+        if not href:
+            continue
+
+
+        # Полная ссылка
+        href = urljoin(
+            "https://www.avito.ru",
+            href
+        )
+
+
+        # Фильтр iPhone 13
+
+        if not IPHONE_PATTERN.search(title):
+
+            continue
+
+
+        # Цена
+
+        price_element = item.select_one(
+            '[data-marker="item-price"]'
+        )
+
+        if price_element:
+
+            price_text = price_element.get_text(
+                " ",
+                strip=True
+            )
+
+        else:
+
+            # запасной вариант
+            price_element = item.select_one(
+                '[itemprop="price"]'
+            )
+
+            if price_element:
+
+                price_text = (
+                    price_element.get("content")
+                    or price_element.get_text(
+                        " ",
+                        strip=True
+                    )
+                )
+
+            else:
+
+                price_text = ""
+
+
+        price = get_price(price_text)
+
+
+        if price is None:
+
+            continue
+
+
+        if price > MAX_PRICE:
+
+            continue
+
+
+        result.append({
+
+            "title": title,
+
+            "price": price,
+
+            "url": href
+
+        })
+
+
+    return result
+
+
+# =========================
+# ПРОВЕРКА AVITO
+# =========================
+
+def check_avito():
+
+    seen = load_seen()
+
+    new_count = 0
+
+
+    for search_url in SEARCH_URLS:
+
+        print(
+            "\n🔎 Проверяем:",
+            search_url
+        )
+
+
+        ads = get_ads(search_url)
+
+
+        print(
+            "Подходящих объявлений:",
+            len(ads)
+        )
+
+
+        for ad in ads:
+
+            ad_id = ad["url"]
+
+
+            if ad_id in seen:
+
+                continue
+
+
+            # Сначала запоминаем
+            seen.add(ad_id)
+
+            new_count += 1
+
+
+            message = (
+
+                "🚨 НОВЫЙ IPHONE\n\n"
+
+                f"📱 {ad['title']}\n"
+
+                f"💰 {ad['price']:,} ₽\n"
+
+                f"📍 Москва\n\n"
+
+                f"🔗 {ad['url']}\n\n"
+
+                f"⚙️ Лимит: {MAX_PRICE:,} ₽"
+
+            )
+
+
+            print(
+                "📤 Отправляем:",
+                ad["title"],
+                ad["price"]
+            )
+
+
+            send_telegram(message)
+
+
+            time.sleep(1)
+
+
+    save_seen(seen)
+
+
+    print(
+        f"✅ Новых объявлений: {new_count}"
+    )
+
+
+# =========================
+# TELEGRAM КОМАНДЫ
+# =========================
+
+def check_telegram():
+
+    offset = load_offset()
+
+
+    url = (
+        f"https://api.telegram.org/"
+        f"bot{BOT_TOKEN}/getUpdates"
+    )
+
+
+    try:
+
+        response = requests.get(
+
+            url,
+
+            params={
+                "offset": offset,
+                "timeout": 1
+            },
+
+            timeout=10
+        )
+
+
+        data = response.json()
+
+
+        if not data.get("ok"):
+
+            print(
+                "❌ Ошибка Telegram:",
+                data
+            )
+
+            return
+
+
+        updates = data.get(
+            "result",
+            []
+        )
+
+
+        for update in updates:
+
+            # Очень важно:
+            # запоминаем следующий offset
+
+            update_id = update["update_id"]
+
+            save_offset(update_id + 1)
+
+
+            message = update.get(
+                "message"
+            )
+
+
+            if not message:
+
+                continue
+
+
+            chat_id = message["chat"]["id"]
+
+            text = (
+                message
+                .get("text", "")
+                .strip()
+                .lower()
+            )
+
+
+            # Сохраняем chat_id
+
+            save_chat_id(chat_id)
+
+
+            # /start
+
+            if text == "/start":
+
+                send_telegram(
+
+                    "👋 Привет!\n\n"
+
+                    "🤖 Я Avito-монитор iPhone.\n\n"
+
+                    "📍 Москва\n"
+
+                    f"💰 Максимальная цена: "
+                    f"{MAX_PRICE:,} ₽\n"
+
+                    f"🔄 Проверка каждые "
+                    f"{CHECK_INTERVAL // 60} минут.\n\n"
+
+                    "🟢 Мониторинг запущен.\n"
+
+                    "Я буду присылать "
+                    "новые подходящие объявления.",
+
+                    chat_id
+
+                )
+
+
+            # /status
+
+            elif text == "/status":
+
+                send_telegram(
+
+                    "🟢 Бот работает.\n\n"
+
+                    "📍 Москва\n"
+
+                    f"💰 Лимит: "
+                    f"{MAX_PRICE:,} ₽\n"
+
+                    f"🔄 Интервал: "
+                    f"{CHECK_INTERVAL // 60} минут\n"
+
+                    "📱 Модель: iPhone 13",
+
+                    chat_id
+
+                )
+
+
+            # /check
+
+            elif text == "/check":
+
+                send_telegram(
+
+                    "🔎 Проверяю Avito...",
+
+                    chat_id
+
+                )
+
+                check_avito()
+
+
+    except Exception as e:
+
+        print(
+            "❌ Ошибка Telegram:",
+            e
+        )
+
+
+# =========================
+# MAIN
+# =========================
+
+def main():
+
+    print("=" * 50)
+
+    print(
+        "🚀 Avito iPhone Monitor запущен"
+    )
+
+    print(
+        f"💰 Максимальная цена: "
+        f"{MAX_PRICE:,} ₽"
+    )
+
+    print(
+        f"⏱ Проверка каждые "
+        f"{CHECK_INTERVAL // 60} минут"
+    )
+
+    print("=" * 50)
+
+
+    while True:
+
+        print(
+            "\n📨 Проверяем Telegram..."
+        )
+
+        check_telegram()
+
+
+        print(
+            "\n🔎 Проверяем Avito..."
+        )
+
+        check_avito()
+
+
+        print(
+            f"\n😴 Следующая проверка "
+            f"через {CHECK_INTERVAL // 60} минут..."
+        )
+
+
+        time.sleep(
+            CHECK_INTERVAL
+        )
 
 
 if __name__ == "__main__":
+
     main()
